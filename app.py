@@ -23,7 +23,7 @@ SHEETS = {
 MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
 CITIES = ["深圳", "上海", "成都", "天津"]
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_token():
     res = requests.post(
         "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
@@ -31,7 +31,7 @@ def get_token():
     )
     return res.json().get("tenant_access_token")
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_spreadsheet_token():
     token = get_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -41,7 +41,7 @@ def get_spreadsheet_token():
     ).json()
     return res.get("data", {}).get("node", {}).get("obj_token")
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def read_sheet(spreadsheet_token, sheet_id, data_range="A1:Z500"):
     token = get_token()
     headers = {"Authorization": f"Bearer {token}"}
