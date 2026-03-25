@@ -126,6 +126,8 @@ with st.spinner("正在加载数据..."):
     df_main = clean_main_df(df_main_raw.copy())
     df_detail_raw = read_sheet(spreadsheet_token, SHEETS["细分项汇总"], "A1:P500")
     df_detail = clean_detail_df(df_detail_raw.copy())
+if df_detail is None:
+    df_detail = pd.DataFrame()
 
 # ── 侧边栏筛选 ──
 st.sidebar.header("🔍 筛选条件")
@@ -133,6 +135,8 @@ sel_city = st.sidebar.selectbox("筛选城市", ["全部城市"] + CITIES)
 sel_month = st.sidebar.selectbox("筛选月份", ["全部月份"] + MONTHS)
 
 def apply_filter(df, city, month):
+    if df is None or not isinstance(df, pd.DataFrame):
+        return pd.DataFrame()
     d = df.copy()
     if city != "全部城市" and "地区" in d.columns:
         d = d[d["地区"] == city]
