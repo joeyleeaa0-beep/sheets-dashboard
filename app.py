@@ -79,43 +79,60 @@ def clean_main_df(df):
     return df
 
 def clean_detail_df(df):
-    """清洗细分项汇总表"""
     if df.empty:
         return df
-    # 跳过第一行标题行（2025年新媒体渠道投放明细）
-    if df.iloc[0, 0] and "新媒体" in str(df.iloc[0, 0]):
-        df = df.iloc[1:].reset_index(drop=True)
-        df.columns = df.iloc[0]
-        df = df.iloc[1:].reset_index(drop=True)
     
+    # 第1行是大标题，第2行是真正表头，从第2行开始重建
+    # 找到真正的表头行（包含"渠道"或"月份"的行）
+    header_idx = None
+    for i, row in df.iterrows():
+        row_vals = [str(v) for v in row.values if v and str(v) != "None"]
+        if any("渠道" in v or "月份" in v for v in row_vals):
+            header_idx = i
+            break
+    
+    if header_idx is None:
+        return pd.DataFrame()
+    
+    # 用找到的行作为表头
+    new_headers = [str(v) if v and str(v) != "None" else f"列{i}" 
+                   for i, v in enumerate(df.iloc[header_idx].values)]
+    df = df.iloc[header_idx+1:].reset_index(drop=True)
+    df.columns = new_headers
+    
+    # 填充合并单元格
     df = fill_merged(df, "月份")
     df = fill_merged(df, "地区")
     
     if "月份" in df.columns:
         df["月份"] = df["月份"].astype(str).str.strip().str.replace(" ", "")
     
-    # 过滤掉合计行，只保留渠道明细行
+    # 过滤掉合计行和空行
     if "渠道/平台" in df.columns:
-        df = df[~df["渠道/平台"].astype(str).str.contains("合计|None|nan", na=True)]
-        df = df[df["渠道/平台"].astype(str).str.strip() != ""]
+        df = df[~df["渠道/平台"].astype(str).str.contains("合计", na=False)]
+        df = df[df["渠道/平台"].notna()]
+        df = df[df["渠道/平台"].astype(str).str.strip().isin(["", "None", "nan"]) == False]
     
     # 过滤城市
     if "地区" in df.columns:
         df = df[df["地区"].isin(CITIES)]
     
-    # 数值转换
+    # 数值转换（过滤掉公式文本）
     num_cols = ["投放金额", "总成交量", "销售量", "收购量"]
     for col in num_cols:
         if col in df.columns:
+            df[col] = df[col].astype(str).str.replace(r'IFERROR.*', '0', regex=True)
+            df[col] = df[col].str.replace("/", "0")
             df[col] = to_num(df[col])
     
     # 客资列
     for col in df.columns:
         if "客资" in col and "成本" not in col and "直播" not in col and "视频" not in col:
-            df["客资量"] = to_num(df[col])
+            df["客资量"] = df[col].astype(str).str.replace("/", "0")
+            df["客资量"] = to_num(df["客资量"])
             break
     
-    # 渠道分类（把抖音各账号归为抖音）
+    # 渠道分类
     if "渠道/平台" in df.columns:
         df["渠道分类"] = df["渠道/平台"].astype(str).apply(lambda x:
             "抖音" if "抖音" in x else
