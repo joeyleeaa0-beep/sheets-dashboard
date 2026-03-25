@@ -221,6 +221,9 @@ with tab1:
 
 with tab2:
     st.subheader("分渠道数据对比")
+    st.write("渠道明细列名：", list(df_detail_filtered.columns))
+    st.write("渠道明细前5行：", df_detail_filtered.head())
+    st.write("渠道分类是否存在：", "渠道分类" in df_detail_filtered.columns)
     if not df_detail_filtered.empty and "渠道分类" in df_detail_filtered.columns:
         channel_group = df_detail_filtered.groupby("渠道分类").agg(
             投放金额=("投放金额", "sum"),
