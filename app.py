@@ -77,6 +77,3 @@ st.title("📊 新媒体数据看板")
 st.subheader("原始数据预览（调试）")
 st.write("列名：", list(df_main.columns) if not df_main.empty else "空")
 st.dataframe(df_main.head(20))
-```
-
----
