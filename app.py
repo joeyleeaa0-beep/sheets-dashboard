@@ -118,12 +118,16 @@ def clean_detail_df(df):
         df = df[df["地区"].isin(CITIES)]
     
     # 数值转换（过滤掉公式文本）
-    num_cols = ["投放金额", "总成交量", "销售量", "收购量"]
-    for col in num_cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.replace(r'IFERROR.*', '0', regex=True)
-            df[col] = df[col].str.replace("/", "0")
-            df[col] = to_num(df[col])
+   # 数值转换
+    for col in df.columns:
+        val = df[col].astype(str)
+        val = val.str.replace(r'IFERROR.*', '0', regex=True)
+        val = val.str.replace("/", "0")
+        df[col] = to_num(val)
+    
+    # 重新计算总成交量 = 销售量 + 收购量
+    if "销售量" in df.columns and "收购量" in df.columns:
+        df["总成交量"] = to_num(df["销售量"]) + to_num(df["收购量"])
     
     # 客资列
     for col in df.columns:
@@ -238,9 +242,6 @@ with tab1:
 
 with tab2:
     st.subheader("分渠道数据对比")
-    st.write("渠道明细列名：", list(df_detail_filtered.columns))
-    st.write("渠道明细前5行：", df_detail_filtered.head())
-    st.write("渠道分类是否存在：", "渠道分类" in df_detail_filtered.columns)
     if not df_detail_filtered.empty and "渠道分类" in df_detail_filtered.columns:
         channel_group = df_detail_filtered.groupby("渠道分类").agg(
             投放金额=("投放金额", "sum"),
