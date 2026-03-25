@@ -12,12 +12,6 @@ WIKI_TOKEN = "G0VbwCGGMiEVNlktEYwcoA4JnHd"
 SHEETS = {
     "四地汇总": "0HBHQk",
     "细分项汇总": "1hOmjY",
-    "直播号": "2qReEC",
-    "信息流": "3aoFSL",
-    "小红书": "4jVWrG",
-    "视频号": "5xwXLW",
-    "B站": "6lywkx",
-    "快手": "7szWUE",
 }
 
 MONTHS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
@@ -45,7 +39,6 @@ def get_spreadsheet_token():
 def read_sheet(spreadsheet_token, sheet_id, data_range="A1:Z500"):
     token = get_token()
     headers = {"Authorization": f"Bearer {token}"}
-    # 用renderType=FORMULA获取计算结果而不是公式
     url = f"https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values/{sheet_id}!{data_range}?renderType=FORMATTED_VALUE"
     res = requests.get(url, headers=headers).json()
     values = res.get("data", {}).get("valueRange", {}).get("values", [])
@@ -59,33 +52,79 @@ def read_sheet(spreadsheet_token, sheet_id, data_range="A1:Z500"):
 def to_num(series):
     return pd.to_numeric(series, errors="coerce").fillna(0)
 
+def fill_merged(df, col):
+    """处理合并单元格：向下填充"""
+    if col in df.columns:
+        df[col] = df[col].replace([None, "None", "", "nan", "/"], pd.NA)
+        df[col] = df[col].ffill()
+    return df
+
 def clean_main_df(df):
     if df.empty:
         return df
-    
-    # 处理月份列：合并单元格只有第一行有值，需要向下填充
+    df = fill_merged(df, "月份")
     if "月份" in df.columns:
-        df["月份"] = df["月份"].replace([None, "None", "", "nan"], pd.NA)
-        df["月份"] = df["月份"].ffill()
         df["月份"] = df["月份"].astype(str).str.strip().str.replace(" ", "")
-    
-    # 处理地区列：同样可能有合并单元格
     if "地区" in df.columns:
         df["地区"] = df["地区"].replace([None, "None", "", "nan"], pd.NA)
-        # 不向下填充地区，而是根据城市名过滤
         df = df[df["地区"].isin(CITIES)]
-    
-    # 转换数值列
     num_cols = ["投放金额", "总成交量", "销售量", "收购量", "直播成交", "视频成交"]
     for col in num_cols:
         if col in df.columns:
             df[col] = to_num(df[col])
-    
-    # 找客资列
     for col in df.columns:
         if "客资" in col and "成本" not in col:
             df["客资量"] = to_num(df[col])
             break
+    return df
+
+def clean_detail_df(df):
+    """清洗细分项汇总表"""
+    if df.empty:
+        return df
+    # 跳过第一行标题行（2025年新媒体渠道投放明细）
+    if df.iloc[0, 0] and "新媒体" in str(df.iloc[0, 0]):
+        df = df.iloc[1:].reset_index(drop=True)
+        df.columns = df.iloc[0]
+        df = df.iloc[1:].reset_index(drop=True)
+    
+    df = fill_merged(df, "月份")
+    df = fill_merged(df, "地区")
+    
+    if "月份" in df.columns:
+        df["月份"] = df["月份"].astype(str).str.strip().str.replace(" ", "")
+    
+    # 过滤掉合计行，只保留渠道明细行
+    if "渠道/平台" in df.columns:
+        df = df[~df["渠道/平台"].astype(str).str.contains("合计|None|nan", na=True)]
+        df = df[df["渠道/平台"].astype(str).str.strip() != ""]
+    
+    # 过滤城市
+    if "地区" in df.columns:
+        df = df[df["地区"].isin(CITIES)]
+    
+    # 数值转换
+    num_cols = ["投放金额", "总成交量", "销售量", "收购量"]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = to_num(df[col])
+    
+    # 客资列
+    for col in df.columns:
+        if "客资" in col and "成本" not in col and "直播" not in col and "视频" not in col:
+            df["客资量"] = to_num(df[col])
+            break
+    
+    # 渠道分类（把抖音各账号归为抖音）
+    if "渠道/平台" in df.columns:
+        df["渠道分类"] = df["渠道/平台"].astype(str).apply(lambda x:
+            "抖音" if "抖音" in x else
+            "信息流" if "信息流" in x else
+            "小红书" if "小红书" in x else
+            "视频号" if "视频号" in x else
+            "B站" if "B站" in x else
+            "快手" if "快手" in x else x
+        )
     
     return df
 
@@ -101,21 +140,29 @@ with st.spinner("正在连接飞书..."):
         st.stop()
 
 with st.spinner("正在加载数据..."):
-    df_raw = read_sheet(spreadsheet_token, SHEETS["四地汇总"], "A2:K200")
-    df = clean_main_df(df_raw.copy())
+    df_main_raw = read_sheet(spreadsheet_token, SHEETS["四地汇总"], "A2:K200")
+    df_main = clean_main_df(df_main_raw.copy())
+    df_detail_raw = read_sheet(spreadsheet_token, SHEETS["细分项汇总"], "A1:P500")
+    df_detail = clean_detail_df(df_detail_raw.copy())
 
 # ── 侧边栏筛选 ──
 st.sidebar.header("🔍 筛选条件")
 sel_city = st.sidebar.selectbox("筛选城市", ["全部城市"] + CITIES)
 sel_month = st.sidebar.selectbox("筛选月份", ["全部月份"] + MONTHS)
 
-df_filtered = df.copy()
-if sel_city != "全部城市" and "地区" in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered["地区"] == sel_city]
-if sel_month != "全部月份" and "月份" in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered["月份"] == sel_month]
+def apply_filter(df, city, month):
+    d = df.copy()
+    if city != "全部城市" and "地区" in d.columns:
+        d = d[d["地区"] == city]
+    if month != "全部月份" and "月份" in d.columns:
+        d = d[d["月份"] == month]
+    return d
 
-st.sidebar.markdown(f"📋 当前数据：**{len(df_filtered)}** 条")
+df_filtered = apply_filter(df_main, sel_city, sel_month)
+df_detail_filtered = apply_filter(df_detail, sel_city, sel_month)
+
+st.sidebar.markdown(f"📋 四地汇总：**{len(df_filtered)}** 条")
+st.sidebar.markdown(f"📋 渠道明细：**{len(df_detail_filtered)}** 条")
 
 # ── 核心指标 ──
 st.title("📊 新媒体数据看板")
@@ -146,46 +193,113 @@ col8.metric("成交率", f"{chengjiao_rate:.2f}%")
 st.divider()
 
 # ── Tab ──
-tab1, tab2, tab3 = st.tabs(["🏙️ 分城市数据", "📈 月度趋势", "📋 数据明细"])
+tab1, tab2, tab3, tab4 = st.tabs(["🏙️ 分城市数据", "📡 分渠道数据", "📈 趋势分析", "📋 数据明细"])
 
 with tab1:
     st.subheader("分城市经营对比")
-    if "地区" in df_filtered.columns:
-        city_group = df_filtered.groupby("地区").agg(
+    if "地区" in df_main.columns:
+        df_city = apply_filter(df_main, "全部城市", sel_month)
+        city_group = df_city.groupby("地区").agg(
             投放金额=("投放金额", "sum"),
             客资量=("客资量", "sum"),
             总成交量=("总成交量", "sum"),
         ).reset_index()
-        city_group["客资成本"] = (city_group["投放金额"] / city_group["客资量"]).round(2)
-        city_group["成交成本"] = (city_group["投放金额"] / city_group["总成交量"]).round(2)
-        city_group["成交率"] = (city_group["总成交量"] / city_group["客资量"] * 100).round(2)
+        city_group["客资成本"] = (city_group["投放金额"] / city_group["客资量"].replace(0, pd.NA)).round(2)
+        city_group["成交成本"] = (city_group["投放金额"] / city_group["总成交量"].replace(0, pd.NA)).round(2)
+        city_group["成交率"] = (city_group["总成交量"] / city_group["客资量"].replace(0, pd.NA) * 100).round(2)
         st.dataframe(city_group, use_container_width=True, hide_index=True)
 
-        ca, cb, cc = st.columns(3)
+        ca, cb, cc, cd = st.columns(4)
         with ca:
             st.plotly_chart(px.bar(city_group, x="地区", y="客资量", title="各城市客资量", color="地区"), use_container_width=True)
         with cb:
             st.plotly_chart(px.bar(city_group, x="地区", y="总成交量", title="各城市成交量", color="地区"), use_container_width=True)
         with cc:
             st.plotly_chart(px.bar(city_group, x="地区", y="客资成本", title="各城市客资成本", color="地区"), use_container_width=True)
+        with cd:
+            st.plotly_chart(px.bar(city_group, x="地区", y="成交成本", title="各城市成交成本", color="地区"), use_container_width=True)
 
 with tab2:
-    st.subheader("月度趋势")
-    if "月份" in df.columns:
-        df_trend = df.copy()
-        if sel_city != "全部城市":
-            df_trend = df_trend[df_trend["地区"] == sel_city]
-        month_group = df_trend.groupby("月份").agg(
+    st.subheader("分渠道数据对比")
+    if not df_detail_filtered.empty and "渠道分类" in df_detail_filtered.columns:
+        channel_group = df_detail_filtered.groupby("渠道分类").agg(
             投放金额=("投放金额", "sum"),
             客资量=("客资量", "sum"),
             总成交量=("总成交量", "sum"),
         ).reset_index()
-        month_group["月份"] = pd.Categorical(month_group["月份"], categories=MONTHS, ordered=True)
-        month_group = month_group.sort_values("月份")
+        channel_group["客资成本"] = (channel_group["投放金额"] / channel_group["客资量"].replace(0, pd.NA)).round(2)
+        channel_group = channel_group.sort_values("客资量", ascending=False)
 
-        st.plotly_chart(px.line(month_group, x="月份", y=["投放金额", "客资量"], title="月度投放与客资趋势", markers=True), use_container_width=True)
-        st.plotly_chart(px.bar(month_group, x="月份", y="总成交量", title="月度成交量", color="月份"), use_container_width=True)
+        st.dataframe(channel_group, use_container_width=True, hide_index=True)
+
+        ra, rb = st.columns(2)
+        with ra:
+            st.plotly_chart(px.bar(channel_group, x="渠道分类", y="客资量",
+                title="各渠道客资量对比", color="渠道分类"), use_container_width=True)
+        with rb:
+            st.plotly_chart(px.bar(channel_group, x="渠道分类", y="投放金额",
+                title="各渠道投放金额对比", color="渠道分类"), use_container_width=True)
+
+        rc, rd = st.columns(2)
+        with rc:
+            st.plotly_chart(px.bar(channel_group, x="渠道分类", y="总成交量",
+                title="各渠道成交量对比", color="渠道分类"), use_container_width=True)
+        with rd:
+            st.plotly_chart(px.bar(channel_group, x="渠道分类", y="客资成本",
+                title="各渠道客资成本对比", color="渠道分类"), use_container_width=True)
+
+        # 饼图
+        re, rf = st.columns(2)
+        with re:
+            st.plotly_chart(px.pie(channel_group, names="渠道分类", values="客资量",
+                title="各渠道客资量占比"), use_container_width=True)
+        with rf:
+            st.plotly_chart(px.pie(channel_group, names="渠道分类", values="投放金额",
+                title="各渠道投放占比"), use_container_width=True)
+    else:
+        st.info("暂无渠道数据")
 
 with tab3:
+    st.subheader("趋势分析")
+
+    # 各城市客资成本月度趋势
+    if "月份" in df_main.columns and "地区" in df_main.columns:
+        df_trend = df_main.copy()
+        if sel_city != "全部城市":
+            df_trend = df_trend[df_trend["地区"] == sel_city]
+
+        city_month = df_trend.groupby(["月份", "地区"]).agg(
+            投放金额=("投放金额", "sum"),
+            客资量=("客资量", "sum"),
+            总成交量=("总成交量", "sum"),
+        ).reset_index()
+        city_month["客资成本"] = (city_month["投放金额"] / city_month["客资量"].replace(0, pd.NA)).round(2)
+        city_month["成交成本"] = (city_month["投放金额"] / city_month["总成交量"].replace(0, pd.NA)).round(2)
+        city_month["月份"] = pd.Categorical(city_month["月份"], categories=MONTHS, ordered=True)
+        city_month = city_month.sort_values("月份")
+
+        st.plotly_chart(px.line(city_month, x="月份", y="客资成本", color="地区",
+            title="各城市客资成本月度趋势", markers=True), use_container_width=True)
+
+        st.plotly_chart(px.line(city_month, x="月份", y="成交成本", color="地区",
+            title="各城市成交成本月度趋势", markers=True), use_container_width=True)
+
+        # 大盘投放与客资趋势
+        total_month = df_trend.groupby("月份").agg(
+            投放金额=("投放金额", "sum"),
+            客资量=("客资量", "sum"),
+            总成交量=("总成交量", "sum"),
+        ).reset_index()
+        total_month["月份"] = pd.Categorical(total_month["月份"], categories=MONTHS, ordered=True)
+        total_month = total_month.sort_values("月份")
+
+        st.plotly_chart(px.line(total_month, x="月份", y=["客资量", "总成交量"],
+            title="月度客资与成交趋势", markers=True), use_container_width=True)
+
+with tab4:
     st.subheader("数据明细")
-    st.dataframe(df_filtered.dropna(axis=1, how='all'), use_container_width=True)
+    inner_tab1, inner_tab2 = st.tabs(["四地汇总", "渠道明细"])
+    with inner_tab1:
+        st.dataframe(df_filtered.dropna(axis=1, how='all'), use_container_width=True)
+    with inner_tab2:
+        st.dataframe(df_detail_filtered.dropna(axis=1, how='all'), use_container_width=True)
