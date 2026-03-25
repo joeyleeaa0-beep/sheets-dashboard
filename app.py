@@ -66,7 +66,7 @@ def clean_main_df(df):
     # 填充月份空值（向下填充）
     if "月份" in df.columns:
         df["月份"] = df["月份"].replace("None", None).replace("", None)
-        df["月份"] = df["月份"].ffill()
+        df["月份"] = df["月份"].str.strip().str.replace(" ", "")
     # 过滤掉汇总行和空行
     if "地区" in df.columns:
         df = df[df["地区"].isin(CITIES)]
