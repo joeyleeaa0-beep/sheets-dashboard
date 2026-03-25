@@ -60,26 +60,33 @@ def to_num(series):
     return pd.to_numeric(series, errors="coerce").fillna(0)
 
 def clean_main_df(df):
-    """清洗四地汇总表：填充月份空值，过滤汇总行"""
     if df.empty:
         return df
-    # 填充月份空值（向下填充）
+    
+    # 处理月份列：合并单元格只有第一行有值，需要向下填充
     if "月份" in df.columns:
-        df["月份"] = df["月份"].replace("None", None).replace("", None)
-        df["月份"] = df["月份"].str.strip().str.replace(" ", "")
-    # 过滤掉汇总行和空行
+        df["月份"] = df["月份"].replace([None, "None", "", "nan"], pd.NA)
+        df["月份"] = df["月份"].ffill()
+        df["月份"] = df["月份"].astype(str).str.strip().str.replace(" ", "")
+    
+    # 处理地区列：同样可能有合并单元格
     if "地区" in df.columns:
+        df["地区"] = df["地区"].replace([None, "None", "", "nan"], pd.NA)
+        # 不向下填充地区，而是根据城市名过滤
         df = df[df["地区"].isin(CITIES)]
+    
     # 转换数值列
-    num_cols = ["投放金额", "客资量（以文员统计为准）", "总成交量", "销售量", "收购量", "直播成交", "视频成交"]
+    num_cols = ["投放金额", "总成交量", "销售量", "收购量", "直播成交", "视频成交"]
     for col in num_cols:
         if col in df.columns:
             df[col] = to_num(df[col])
-    # 找客资列（列名可能不完全匹配）
+    
+    # 找客资列
     for col in df.columns:
         if "客资" in col and "成本" not in col:
             df["客资量"] = to_num(df[col])
             break
+    
     return df
 
 # ── 加载数据 ──
