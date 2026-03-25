@@ -85,9 +85,3 @@ st.subheader("📋 原始数据预览（调试用）")
 st.write("列名：", list(df_main.columns))
 st.dataframe(df_main.head(10))
 ```
-
----
-
-两个文件创建好提交后，去 Streamlit Cloud 部署（和之前一样的步骤），URL填：
-```
-https://github.com/joeyleeaa0-beep/sheets-dashboard/blob/main/app.py
