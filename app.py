@@ -85,3 +85,5 @@ st.subheader("📋 原始数据预览（调试用）")
 st.write("列名：", list(df_main.columns))
 st.dataframe(df_main.head(10))
 ```
+
+---
