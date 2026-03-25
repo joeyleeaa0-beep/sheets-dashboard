@@ -79,64 +79,27 @@ def clean_main_df(df):
     return df
 
 def clean_detail_df(df):
-    if df.empty:
-        return df
+    # 数值转换（只处理数值列）
+    num_cols = ["投放金额", "销售量", "收购量", "素材更新量", "直播场次"]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.replace(r'IFERROR.*', '0', regex=True)
+            df[col] = df[col].str.replace("/", "0")
+            df[col] = to_num(df[col])
     
-    # 第1行是大标题，第2行是真正表头，从第2行开始重建
-    # 找到真正的表头行（包含"渠道"或"月份"的行）
-    header_idx = None
-    for i, row in df.iterrows():
-        row_vals = [str(v) for v in row.values if v and str(v) != "None"]
-        if any("渠道" in v or "月份" in v for v in row_vals):
-            header_idx = i
-            break
-    
-    if header_idx is None:
-        return pd.DataFrame()
-    
-    # 用找到的行作为表头
-    new_headers = [str(v) if v and str(v) != "None" else f"列{i}" 
-                   for i, v in enumerate(df.iloc[header_idx].values)]
-    df = df.iloc[header_idx+1:].reset_index(drop=True)
-    df.columns = new_headers
-    
-    # 填充合并单元格
-    df = fill_merged(df, "月份")
-    df = fill_merged(df, "地区")
-    
-    if "月份" in df.columns:
-        df["月份"] = df["月份"].astype(str).str.strip().str.replace(" ", "")
-    
-    # 过滤掉合计行和空行
-    if "渠道/平台" in df.columns:
-        df = df[~df["渠道/平台"].astype(str).str.contains("合计", na=False)]
-        df = df[df["渠道/平台"].notna()]
-        df = df[df["渠道/平台"].astype(str).str.strip().isin(["", "None", "nan"]) == False]
-    
-    # 过滤城市
-    if "地区" in df.columns:
-        df = df[df["地区"].isin(CITIES)]
-    
-    # 数值转换（过滤掉公式文本）
-   # 数值转换
+    # 客资列单独处理
     for col in df.columns:
-        val = df[col].astype(str)
-        val = val.str.replace(r'IFERROR.*', '0', regex=True)
-        val = val.str.replace("/", "0")
-        df[col] = to_num(val)
+        if "客资" in col and "成本" not in col and "直播" not in col and "视频" not in col:
+            df["客资量"] = df[col].astype(str).str.replace("/", "0")
+            df["客资量"] = df["客资量"].str.replace(r'IFERROR.*', '0', regex=True)
+            df["客资量"] = to_num(df["客资量"])
+            break
     
     # 重新计算总成交量 = 销售量 + 收购量
     if "销售量" in df.columns and "收购量" in df.columns:
         df["总成交量"] = to_num(df["销售量"]) + to_num(df["收购量"])
     
-    # 客资列
-    for col in df.columns:
-        if "客资" in col and "成本" not in col and "直播" not in col and "视频" not in col:
-            df["客资量"] = df[col].astype(str).str.replace("/", "0")
-            df["客资量"] = to_num(df["客资量"])
-            break
-    
-    # 渠道分类
+    # 渠道分类（在数值转换之后做）
     if "渠道/平台" in df.columns:
         df["渠道分类"] = df["渠道/平台"].astype(str).apply(lambda x:
             "抖音" if "抖音" in x else
@@ -146,8 +109,6 @@ def clean_detail_df(df):
             "B站" if "B站" in x else
             "快手" if "快手" in x else x
         )
-    
-    return df
 
 # ── 加载数据 ──
 with st.spinner("正在连接飞书..."):
