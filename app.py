@@ -180,6 +180,11 @@ def clean_main_df(df):
         if "客资" in col and "成本" not in col:
             df["客资量"] = to_num(df[col])
             break
+    # 重新计算成本（不依赖飞书公式）
+    if "投放金额" in df.columns and "客资量" in df.columns:
+        df["综合客资成本"] = (df["投放金额"] / df["客资量"].replace(0, pd.NA)).round(2)
+    if "投放金额" in df.columns and "总成交量" in df.columns:
+        df["综合成交成本"] = (df["投放金额"] / df["总成交量"].replace(0, pd.NA)).round(2)
     return df
 
 def clean_detail_df(df):
