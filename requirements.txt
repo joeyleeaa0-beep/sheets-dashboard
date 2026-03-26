@@ -4,4 +4,4 @@ requests
 plotly
 xlsxwriter
 matplotlib
-reportlab
+python-docx
