@@ -14,7 +14,6 @@ from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 import datetime
-import subprocess
 import os
 
 st.set_page_config(page_title="新媒体数据看板", page_icon="📊", layout="wide")
@@ -56,46 +55,42 @@ PLOTLY_LAYOUT = dict(
     yaxis=dict(gridcolor="#f3f4f6", linecolor="#eef0f4"),
 )
 
-# ── 中文字体设置（Streamlit Cloud Linux 环境）──
+# ── 中文字体设置 ──
 @st.cache_resource
 def setup_chinese_font():
-    """安装并返回可用的中文字体名称"""
-    # 先检查是否已有中文字体
-    font_names = {f.name for f in fm.fontManager.ttflist}
-    cjk_fonts = ['Noto Sans CJK SC', 'Noto Sans CJK', 'WenQuanYi Micro Hei', 'AR PL UMing CN']
-    for font in cjk_fonts:
-        if font in font_names:
-            return font
-    # 没有则尝试安装
-    try:
-        subprocess.run(
-            ['apt-get', 'install', '-y', 'fonts-noto-cjk'],
-            capture_output=True, timeout=120
-        )
-        # 重建字体缓存
-        fm.fontManager.__init__()
-        font_names = {f.name for f in fm.fontManager.ttflist}
-        for font in cjk_fonts:
-            if font in font_names:
-                return font
-    except Exception:
-        pass
-    # 最后尝试直接找 ttf 文件路径
-    try:
-        result = subprocess.run(['find', '/usr', '-name', '*.ttf', '-path', '*noto*'],
-                                capture_output=True, text=True, timeout=10)
-        paths = [p for p in result.stdout.strip().split('\n') if p and 'CJK' in p]
-        if paths:
-            fm.fontManager.addfont(paths[0])
-            prop = fm.FontProperties(fname=paths[0])
-            return prop.get_name()
-    except Exception:
-        pass
-    return 'DejaVu Sans'  # 最终兜底
+    font_path = "/tmp/NotoSansSC.ttf"
+    if not os.path.exists(font_path):
+        urls = [
+            "https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf",
+            "https://github.com/googlefonts/noto-cjk/raw/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf",
+        ]
+        for url in urls:
+            try:
+                r = requests.get(url, timeout=30)
+                if r.status_code == 200:
+                    with open(font_path, "wb") as f:
+                        f.write(r.content)
+                    break
+            except Exception:
+                continue
+    if os.path.exists(font_path):
+        try:
+            fm.fontManager.addfont(font_path)
+            prop = fm.FontProperties(fname=font_path)
+            return prop.get_name(), font_path
+        except Exception:
+            pass
+    return None, None
 
-CHINESE_FONT = setup_chinese_font()
-plt.rcParams['font.sans-serif'] = [CHINESE_FONT, 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
+CHINESE_FONT_NAME, CHINESE_FONT_PATH = setup_chinese_font()
+CHINESE_FONT = CHINESE_FONT_NAME or "DejaVu Sans"
+plt.rcParams["font.sans-serif"] = [CHINESE_FONT, "DejaVu Sans"]
+plt.rcParams["axes.unicode_minus"] = False
+
+def get_font_prop():
+    if CHINESE_FONT_PATH and os.path.exists(CHINESE_FONT_PATH):
+        return fm.FontProperties(fname=CHINESE_FONT_PATH)
+    return fm.FontProperties(family=CHINESE_FONT)
 
 # ── API ──
 @st.cache_data(ttl=60)
@@ -224,13 +219,13 @@ def clean_detail_df(df):
 
 # ── matplotlib 图表 ──
 def bar_image(df, x_col, y_col, title, width=8, height=3.5):
+    fp = get_font_prop()
     fig, ax = plt.subplots(figsize=(width, height))
     vals = df[y_col].tolist()
     labels = df[x_col].astype(str).tolist()
     bar_colors = [COLORS[i % len(COLORS)] for i in range(len(labels))]
     bars = ax.bar(labels, vals, color=bar_colors, edgecolor='white', linewidth=0.5, width=0.5)
-    ax.set_title(title, fontsize=12, pad=12, color='#111827', fontweight='bold',
-                 fontproperties=fm.FontProperties(family=CHINESE_FONT))
+    ax.set_title(title, fontsize=12, pad=12, color='#111827', fontweight='bold', fontproperties=fp)
     for spine in ['top','right']:
         ax.spines[spine].set_visible(False)
     for spine in ['left','bottom']:
@@ -244,9 +239,8 @@ def bar_image(df, x_col, y_col, title, width=8, height=3.5):
         if v > 0:
             ax.text(bar.get_x() + bar.get_width()/2., v * 1.01,
                     f'{v:,.0f}', ha='center', va='bottom', fontsize=8, color='#374151')
-    # 设置刻度标签字体
     for label in ax.get_xticklabels():
-        label.set_fontfamily(CHINESE_FONT)
+        label.set_font_properties(fp)
     plt.tight_layout()
     buf = BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
@@ -255,6 +249,7 @@ def bar_image(df, x_col, y_col, title, width=8, height=3.5):
     return buf
 
 def line_image(df, x_col, y_col, color_col, title, width=8, height=3.5):
+    fp = get_font_prop()
     fig, ax = plt.subplots(figsize=(width, height))
     groups = df[color_col].unique()
     for i, grp in enumerate(groups):
@@ -262,8 +257,7 @@ def line_image(df, x_col, y_col, color_col, title, width=8, height=3.5):
         ax.plot(d[x_col].astype(str), d[y_col],
                 marker='o', color=COLORS[i % len(COLORS)],
                 linewidth=2, markersize=5, label=str(grp))
-    ax.set_title(title, fontsize=12, pad=12, color='#111827', fontweight='bold',
-                 fontproperties=fm.FontProperties(family=CHINESE_FONT))
+    ax.set_title(title, fontsize=12, pad=12, color='#111827', fontweight='bold', fontproperties=fp)
     for spine in ['top','right']:
         ax.spines[spine].set_visible(False)
     for spine in ['left','bottom']:
@@ -271,13 +265,11 @@ def line_image(df, x_col, y_col, color_col, title, width=8, height=3.5):
     ax.tick_params(colors='#6b7280', labelsize=9)
     ax.yaxis.grid(True, color='#f3f4f6', linewidth=0.8)
     ax.set_axisbelow(True)
-    ax.legend(fontsize=8, framealpha=0, loc='upper left',
-              prop=fm.FontProperties(family=CHINESE_FONT))
+    ax.legend(fontsize=8, framealpha=0, loc='upper left', prop=fp)
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
-    # 设置刻度标签字体
     for label in ax.get_xticklabels():
-        label.set_fontfamily(CHINESE_FONT)
+        label.set_font_properties(fp)
     plt.tight_layout()
     buf = BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
@@ -321,8 +313,6 @@ def add_divider(doc):
 
 def generate_word(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
     doc = Document()
-
-    # 页面设置
     section = doc.sections[0]
     section.page_width = Cm(21)
     section.page_height = Cm(29.7)
@@ -331,7 +321,6 @@ def generate_word(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
     section.top_margin = Cm(2)
     section.bottom_margin = Cm(2)
 
-    # 标题
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.LEFT
     title.paragraph_format.space_after = Pt(4)
@@ -350,7 +339,6 @@ def generate_word(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
 
     add_divider(doc)
 
-    # ── 核心指标 ──
     add_section_title(doc, "📊 核心指标总览")
     m = metrics
     metric_rows = [
@@ -388,7 +376,6 @@ def generate_word(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
 
     add_divider(doc)
 
-    # ── 分城市 ──
     if cg is not None and not cg.empty:
         add_section_title(doc, "🏙️ 分城市经营对比")
         city_cols = [c for c in ["地区","投放金额","客资量","总成交量","客资成本","成交成本","成交率%"] if c in cg.columns]
@@ -425,7 +412,6 @@ def generate_word(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
 
     add_divider(doc)
 
-    # ── 分渠道 ──
     if rg is not None and not rg.empty:
         add_section_title(doc, "📡 分渠道数据对比")
         ch_cols = [c for c in ["渠道分类","投放金额","客资量","总成交量","客资成本"] if c in rg.columns]
@@ -462,7 +448,6 @@ def generate_word(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
 
     add_divider(doc)
 
-    # ── 趋势分析 ──
     if cm_df is not None and not cm_df.empty:
         add_section_title(doc, "📈 趋势分析")
         img5 = line_image(cm_df, "月份", "客资成本", "地区", "各城市客资成本月度趋势")
