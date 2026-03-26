@@ -3,5 +3,5 @@ pandas
 requests
 plotly
 xlsxwriter
-kaleido
+matplotlib
 reportlab
