@@ -49,8 +49,13 @@ COLORS = ["#4f46e5","#06b6d4","#10b981","#f59e0b","#ef4444","#8b5cf6"]
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="white", plot_bgcolor="white",
     font=dict(family="sans-serif", size=12, color="#374151"),
-    margin=dict(l=16, r=16, t=40, b=16),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    margin=dict(l=16, r=16, t=48, b=16),
+    legend=dict(
+        orientation="h",
+        yanchor="top", y=-0.2,
+        xanchor="center", x=0.5,
+        font=dict(size=11),
+    ),
     xaxis=dict(showgrid=False, linecolor="#eef0f4"),
     yaxis=dict(gridcolor="#f3f4f6", linecolor="#eef0f4"),
 )
