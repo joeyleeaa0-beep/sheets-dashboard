@@ -178,10 +178,11 @@ def make_chart(fig):
     fig.update_layout(**PLOTLY_LAYOUT)
     return fig
 
-def df_to_bar_image(df, x_col, y_col, title, width=7, height=3):
-    fig, ax = plt.subplots(figsize=(width, height))
+def bar_image(df, x_col, y_col, title):
+    fig, ax = plt.subplots(figsize=(7, 3))
     vals = df[y_col].tolist()
-    bars = ax.bar(df[x_col].astype(str), vals, color=COLORS[:len(df)], edgecolor='white', linewidth=0.5)
+    labels = df[x_col].astype(str).tolist()
+    bars = ax.bar(labels, vals, color=COLORS[:len(vals)], edgecolor='white', linewidth=0.5)
     ax.set_title(title, fontsize=11, pad=10, color='#111827')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -192,9 +193,10 @@ def df_to_bar_image(df, x_col, y_col, title, width=7, height=3):
     ax.set_axisbelow(True)
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2., bar.get_height(),
-                f'{v:,.0f}', ha='center', va='bottom', fontsize=8, color='#374151')
+    for bar in bars:
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., h, f'{h:,.0f}',
+                ha='center', va='bottom', fontsize=8, color='#374151')
     plt.tight_layout()
     buf = BytesIO()
     plt.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
@@ -202,10 +204,10 @@ def df_to_bar_image(df, x_col, y_col, title, width=7, height=3):
     buf.seek(0)
     return buf
 
-def df_to_line_image(df, x_col, y_col, color_col, title, width=7, height=3):
-    fig, ax = plt.subplots(figsize=(width, height))
+def line_image(df, x_col, y_col, color_col, title):
+    fig, ax = plt.subplots(figsize=(7, 3))
     for i, grp in enumerate(df[color_col].unique()):
-        d = df[df[color_col] == grp].copy()
+        d = df[df[color_col] == grp]
         ax.plot(d[x_col].astype(str), d[y_col], marker='o',
                 color=COLORS[i % len(COLORS)], linewidth=2, markersize=5, label=str(grp))
     ax.set_title(title, fontsize=11, pad=10, color='#111827')
@@ -228,38 +230,36 @@ def df_to_line_image(df, x_col, y_col, color_col, title, width=7, height=3):
 
 def generate_pdf(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
     buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
-        topMargin=1.5*cm, bottomMargin=1.5*cm
-    )
+        topMargin=1.5*cm, bottomMargin=1.5*cm)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('title', fontSize=18, fontName='Helvetica-Bold',
+    title_style = ParagraphStyle('t', fontSize=18, fontName='Helvetica-Bold',
                                   textColor=colors.HexColor('#111827'), spaceAfter=4)
-    subtitle_style = ParagraphStyle('subtitle', fontSize=10, fontName='Helvetica',
-                                     textColor=colors.HexColor('#6b7280'), spaceAfter=16)
-    section_style = ParagraphStyle('section', fontSize=13, fontName='Helvetica-Bold',
-                                    textColor=colors.HexColor('#111827'), spaceBefore=16, spaceAfter=8)
+    sub_style = ParagraphStyle('s', fontSize=10, fontName='Helvetica',
+                                textColor=colors.HexColor('#6b7280'), spaceAfter=16)
+    sec_style = ParagraphStyle('sec', fontSize=13, fontName='Helvetica-Bold',
+                                textColor=colors.HexColor('#111827'), spaceBefore=16, spaceAfter=8)
     story = []
-    page_width = A4[0] - 3*cm
+    pw = A4[0] - 3*cm
 
+    # 标题
     story.append(Paragraph("新媒体数据看板报告", title_style))
     story.append(Paragraph(
         f"城市：{sel_city} · 月份：{sel_month} · 生成时间：{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        subtitle_style
-    ))
+        sub_style))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#eef0f4')))
     story.append(Spacer(1, 0.4*cm))
 
     # 核心指标
-    story.append(Paragraph("核心指标总览", section_style))
-    metric_data = [
+    story.append(Paragraph("核心指标总览", sec_style))
+    mdata = [
         ["总投放金额", "总客资量", "总成交量", "成交率"],
         [metrics['total_spend'], metrics['total_keizi'], metrics['total_chengjiao'], metrics['chengjiao_rate']],
         ["销售总量", "收购总量", "客资成本", "成交成本"],
         [metrics['total_xiaoshou'], metrics['total_shougou'], metrics['keizi_cost'], metrics['chengjiao_cost']],
     ]
-    mt = Table(metric_data, colWidths=[page_width/4]*4)
+    mt = Table(mdata, colWidths=[pw/4]*4)
     mt.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f3f4f6')),
         ('BACKGROUND', (0,2), (-1,2), colors.HexColor('#f3f4f6')),
@@ -279,74 +279,57 @@ def generate_pdf(sel_city, sel_month, metrics, cg, rg, cm_df, ch_month_df):
         ('ROWHEIGHT', (0,0), (-1,-1), 28),
     ]))
     story.append(mt)
-    story.append(Spacer(1, 0.4*cm))
+
+    def add_table(data_df, cols, title):
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#eef0f4')))
+        story.append(Paragraph(title, sec_style))
+        cols = [c for c in cols if c in data_df.columns]
+        tdata = [cols] + [[str(round(v, 2)) if isinstance(v, float) else str(v)
+                           for v in row] for row in data_df[cols].values.tolist()]
+        t = Table(tdata, colWidths=[pw/len(cols)]*len(cols))
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4f46e5')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ROWBACKGROUND', (0,1), (-1,-1), [colors.white, colors.HexColor('#f9fafb')]),
+            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#eef0f4')),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#eef0f4')),
+            ('ROWHEIGHT', (0,0), (-1,-1), 24),
+        ]))
+        story.append(t)
 
     # 分城市
     if cg is not None and not cg.empty:
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#eef0f4')))
-        story.append(Paragraph("分城市经营对比", section_style))
-        city_cols = [c for c in ["地区","投放金额","客资量","总成交量","客资成本","成交成本","成交率%"] if c in cg.columns]
-        city_data = [city_cols] + [[str(round(v, 2)) if isinstance(v, float) else str(v) for v in row]
-                                    for row in cg[city_cols].values.tolist()]
-        ct = Table(city_data, colWidths=[page_width/len(city_cols)]*len(city_cols))
-        ct.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4f46e5')),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-            ('FONTSIZE', (0,0), (-1,-1), 9),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ROWBACKGROUND', (0,1), (-1,-1), [colors.white, colors.HexColor('#f9fafb')]),
-            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#eef0f4')),
-            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#eef0f4')),
-            ('ROWHEIGHT', (0,0), (-1,-1), 24),
-        ]))
-        story.append(ct)
+        add_table(cg, ["地区","投放金额","客资量","总成交量","客资成本","成交成本","成交率%"], "分城市经营对比")
         story.append(Spacer(1, 0.3*cm))
-        img = df_to_bar_image(cg, "地区", "客资量", "各城市客资量对比")
-        story.append(Image(img, width=page_width, height=page_width*3/7))
+        img = bar_image(cg, "地区", "客资量", "各城市客资量对比")
+        story.append(Image(img, width=pw, height=pw*3/7))
 
     # 分渠道
     if rg is not None and not rg.empty:
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#eef0f4')))
-        story.append(Paragraph("分渠道数据对比", section_style))
-        ch_cols = [c for c in ["渠道分类","投放金额","客资量","总成交量","客资成本"] if c in rg.columns]
-        ch_data = [ch_cols] + [[str(round(v, 2)) if isinstance(v, float) else str(v) for v in row]
-                                for row in rg[ch_cols].values.tolist()]
-        cht = Table(ch_data, colWidths=[page_width/len(ch_cols)]*len(ch_cols))
-        cht.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4f46e5')),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-            ('FONTSIZE', (0,0), (-1,-1), 9),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('ROWBACKGROUND', (0,1), (-1,-1), [colors.white, colors.HexColor('#f9fafb')]),
-            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#eef0f4')),
-            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#eef0f4')),
-            ('ROWHEIGHT', (0,0), (-1,-1), 24),
-        ]))
-        story.append(cht)
+        add_table(rg, ["渠道分类","投放金额","客资量","总成交量","客资成本"], "分渠道数据对比")
         story.append(Spacer(1, 0.3*cm))
-        img = df_to_bar_image(rg, "渠道分类", "客资量", "各渠道客资量对比")
-        story.append(Image(img, width=page_width, height=page_width*3/7))
+        img = bar_image(rg, "渠道分类", "客资量", "各渠道客资量对比")
+        story.append(Image(img, width=pw, height=pw*3/7))
 
-    # 趋势图
+    # 趋势
     if cm_df is not None and not cm_df.empty:
         story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#eef0f4')))
-        story.append(Paragraph("趋势分析", section_style))
-        img1 = df_to_line_image(cm_df, "月份", "客资成本", "地区", "各城市客资成本月度趋势")
-        story.append(Image(img1, width=page_width, height=page_width*3/7))
+        story.append(Paragraph("趋势分析", sec_style))
+        img1 = line_image(cm_df, "月份", "客资成本", "地区", "各城市客资成本月度趋势")
+        story.append(Image(img1, width=pw, height=pw*3/7))
         story.append(Spacer(1, 0.3*cm))
-        img2 = df_to_line_image(cm_df, "月份", "成交成本", "地区", "各城市成交成本月度趋势")
-        story.append(Image(img2, width=page_width, height=page_width*3/7))
+        img2 = line_image(cm_df, "月份", "成交成本", "地区", "各城市成交成本月度趋势")
+        story.append(Image(img2, width=pw, height=pw*3/7))
 
     if ch_month_df is not None and not ch_month_df.empty:
         story.append(Spacer(1, 0.3*cm))
-        img3 = df_to_line_image(ch_month_df, "月份", "客资量", "渠道分类", "各渠道客资量月度趋势")
-        story.append(Image(img3, width=page_width, height=page_width*3/7))
+        img3 = line_image(ch_month_df, "月份", "客资量", "渠道分类", "各渠道客资量月度趋势")
+        story.append(Image(img3, width=pw, height=pw*3/7))
 
     doc.build(story)
     buffer.seek(0)
@@ -412,18 +395,18 @@ with st.sidebar:
                 rg = rg.sort_values("客资量", ascending=False)
             cm_df = None
             if not df_main.empty and "月份" in df_main.columns:
-                df_t = df_main.copy()
-                if sel_city != "全部城市" and "地区" in df_t.columns:
-                    df_t = df_t[df_t["地区"] == sel_city]
-                cm_df = df_t.groupby(["月份","地区"]).agg(投放金额=("投放金额","sum"), 客资量=("客资量","sum"), 总成交量=("总成交量","sum")).reset_index()
+                dt = df_main.copy()
+                if sel_city != "全部城市" and "地区" in dt.columns:
+                    dt = dt[dt["地区"] == sel_city]
+                cm_df = dt.groupby(["月份","地区"]).agg(投放金额=("投放金额","sum"), 客资量=("客资量","sum"), 总成交量=("总成交量","sum")).reset_index()
                 cm_df["客资成本"] = (cm_df["投放金额"]/cm_df["客资量"].replace(0,pd.NA)).round(2)
                 cm_df["成交成本"] = (cm_df["投放金额"]/cm_df["总成交量"].replace(0,pd.NA)).round(2)
                 cm_df["月份"] = pd.Categorical(cm_df["月份"], categories=MONTHS, ordered=True)
                 cm_df = cm_df.sort_values("月份")
             ch_month_df = None
             if not df_detail.empty and "月份" in df_detail.columns and "渠道分类" in df_detail.columns:
-                df_ch = apply_filter(df_detail, sel_city, "全部月份")
-                ch_month_df = df_ch.groupby(["月份","渠道分类"]).agg(客资量=("客资量","sum")).reset_index()
+                dc = apply_filter(df_detail, sel_city, "全部月份")
+                ch_month_df = dc.groupby(["月份","渠道分类"]).agg(客资量=("客资量","sum")).reset_index()
                 ch_month_df["月份"] = pd.Categorical(ch_month_df["月份"], categories=MONTHS, ordered=True)
                 ch_month_df = ch_month_df.sort_values("月份")
             try:
